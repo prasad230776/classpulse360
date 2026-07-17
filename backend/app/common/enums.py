@@ -35,12 +35,16 @@ class QuestionType(str, Enum):
     TRUE_FALSE = "TRUE_FALSE"
     SHORT_ANSWER = "SHORT_ANSWER"
     WORD_CLOUD = "WORD_CLOUD"
+    URL = "URL"
+    FILE = "FILE"
+    TEXT = "TEXT"
 
 
 class DeliveryMode(str, Enum):
     INTERACTIVE = "INTERACTIVE"
     CLASSROOM_EXAM = "CLASSROOM_EXAM"
     SELF_PRACTICE = "SELF_PRACTICE"
+    ASSIGNMENT = "ASSIGNMENT"
 
 
 class VisibilityType(str, Enum):

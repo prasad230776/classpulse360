@@ -20,6 +20,7 @@ from app.exceptions import (
     ResourceAlreadyExistsException,
     InvalidSessionStateException,
     AnswerChangeNotAllowedException,
+    BusinessRuleException,
 )
 from app.common.enums import ParticipantStatus, SessionStatus
 
@@ -90,12 +91,39 @@ class ParticipantService:
 
         # Retrieve custom quiz-specific marks configurations (or default to base question marks)
         quiz_assoc = quiz_question_repository.get_association(db, session.quiz_id, question_id)
+        if not quiz_assoc:
+            raise BusinessRuleException(
+                f"Question {question_id} is not associated with this session's quiz.",
+                code="UNLINKED_QUESTION"
+            )
         marks = quiz_assoc.marks if (quiz_assoc and quiz_assoc.marks is not None) else question.default_marks
         negative_marks = quiz_assoc.negative_marks if (quiz_assoc and quiz_assoc.negative_marks is not None) else Decimal("0.00")
 
-        # Verify correct answer selection matches
-        is_correct = (selected_answer == question.correct_answer)
-        score_awarded = marks if is_correct else -negative_marks
+        # Validate assignment submission types
+        from app.common.enums import QuestionType
+        if question.question_type in (QuestionType.URL, QuestionType.FILE, QuestionType.TEXT):
+            if not isinstance(selected_answer, dict):
+                raise BusinessRuleException("Selected answer must be a JSON dictionary.", code="INVALID_SUBMISSION")
+            
+            if question.question_type == QuestionType.URL:
+                url = selected_answer.get("url")
+                if not url or not (url.startswith("http://") or url.startswith("https://")):
+                    raise BusinessRuleException("A valid URL starting with http:// or https:// is required.", code="INVALID_SUBMISSION")
+            elif question.question_type == QuestionType.FILE:
+                file_url = selected_answer.get("file_url")
+                if not file_url or not (file_url.startswith("http://") or file_url.startswith("https://")):
+                    raise BusinessRuleException("A valid file URL is required.", code="INVALID_SUBMISSION")
+            elif question.question_type == QuestionType.TEXT:
+                text_val = selected_answer.get("text")
+                if not text_val or not isinstance(text_val, str) or len(text_val.strip()) == 0:
+                    raise BusinessRuleException("Text content is required.", code="INVALID_SUBMISSION")
+            
+            is_correct = None
+            score_awarded = Decimal("0.00")
+        else:
+            # Verify correct answer selection matches
+            is_correct = (selected_answer == question.correct_answer)
+            score_awarded = marks if is_correct else -negative_marks
 
         # Check if response already exists
         existing_response = response_repository.get_response(db, participant_id, question_id)

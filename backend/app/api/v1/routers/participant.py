@@ -177,13 +177,16 @@ async def submit_answer(
     Submit a selection response for the specified question.
     """
     part = participant_service.get_participant(db, participant_id)
-    active_q = session_service.get_active_question(db, session_id=part.session_id)
-
-    if active_q != payload.question_id:
-        raise BusinessRuleException(
-            "Cannot submit answer. This question is not currently active.",
-            code="QUESTION_NOT_ACTIVE",
-        )
+    session = session_service.get_session(db, session_id=part.session_id)
+    
+    from app.common.enums import DeliveryMode
+    if session.delivery_mode == DeliveryMode.INTERACTIVE:
+        active_q = session_service.get_active_question(db, session_id=part.session_id)
+        if active_q != payload.question_id:
+            raise BusinessRuleException(
+                "Cannot submit answer. This question is not currently active.",
+                code="QUESTION_NOT_ACTIVE",
+            )
 
     resp = participant_service.submit_answer(
         db,

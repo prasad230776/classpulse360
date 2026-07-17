@@ -223,5 +223,13 @@ class SessionService:
             .all()
         )
 
+    def get_session_questions(self, db: Session, *, session_id: UUID):
+        """
+        Retrieves all questions associated with the quiz of a session.
+        """
+        sess = self.get_session(db, session_id)
+        ordered_qqs = sorted(sess.quiz.quiz_questions, key=lambda x: x.question_order or 0)
+        return [qq.question for qq in ordered_qqs]
+
 
 session_service = SessionService()

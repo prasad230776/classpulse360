@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.api.responses import APIResponse
 from app.schemas.session import SessionCreate, SessionResponse
 from app.schemas.participant import ParticipantResponse
+from app.schemas.question import QuestionResponse
 from app.services.session_service import session_service
 from app.services.question_service import question_service
 from app.database.session import get_db
@@ -330,4 +331,22 @@ def get_room_status(id: UUID, db: Session = Depends(get_db)):
         success=True,
         message="Room status retrieved successfully.",
         data=data,
+    )
+
+
+@session_router.get(
+    "/{id}/questions",
+    response_model=APIResponse[List[QuestionResponse]],
+    status_code=status.HTTP_200_OK,
+    summary="Get all questions for a session",
+)
+def get_session_questions(id: UUID, db: Session = Depends(get_db)):
+    """
+    Retrieve all quiz questions associated with the session.
+    """
+    questions = session_service.get_session_questions(db, session_id=id)
+    return APIResponse(
+        success=True,
+        message="Session questions retrieved successfully.",
+        data=[QuestionResponse.model_validate(q) for q in questions],
     )
