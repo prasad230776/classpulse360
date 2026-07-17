@@ -10,6 +10,8 @@ from app.repositories.topic_repository import topic_repository
 from app.repositories.user_repository import user_repository
 from app.exceptions import ResourceNotFoundException, MCQOptionsInvalidException
 
+from app.common.enums import DifficultyLevel
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,62 @@ class QuestionService:
         """
         return question_repository.get_all(db, offset=offset, limit=limit)
 
+    def list_questions_filtered(
+        self,
+        db: Session,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+        subject_id: Optional[UUID] = None,
+        topic_id: Optional[UUID] = None,
+        difficulty_level: Optional[DifficultyLevel] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: str = "desc",
+    ) -> List[Question]:
+        """
+        List questions matching optional filters and custom sorting.
+        """
+        order_attr = None
+        if sort_by:
+            if hasattr(Question, sort_by):
+                order_attr = getattr(Question, sort_by)
+                if sort_order.lower() == "desc":
+                    order_attr = order_attr.desc()
+                else:
+                    order_attr = order_attr.asc()
+
+        return question_repository.get_filtered(
+            db,
+            offset=offset,
+            limit=limit,
+            subject_id=subject_id,
+            topic_id=topic_id,
+            difficulty_level=difficulty_level,
+            search=search,
+            order_by=order_attr,
+        )
+
+    def count_questions_filtered(
+        self,
+        db: Session,
+        *,
+        subject_id: Optional[UUID] = None,
+        topic_id: Optional[UUID] = None,
+        difficulty_level: Optional[DifficultyLevel] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """
+        Count total questions matching filters.
+        """
+        return question_repository.count_filtered(
+            db,
+            subject_id=subject_id,
+            topic_id=topic_id,
+            difficulty_level=difficulty_level,
+            search=search,
+        )
+
     def list_questions_by_topic(self, db: Session, *, topic_id: UUID) -> List[Question]:
         """
         List all questions associated with a specific topic.
@@ -48,6 +106,36 @@ class QuestionService:
         if not query.strip():
             return []
         return question_repository.search(db, query)
+
+    def create_questions_bulk(
+        self, db: Session, *, obj_in_list: List[QuestionCreate]
+    ) -> List[Question]:
+        """
+        Import multiple questions in a single transactional database commit.
+        """
+        logger.info(f"Bulk importing {len(obj_in_list)} questions.")
+        db_objs = []
+        for obj_in in obj_in_list:
+            if not topic_repository.exists(db, obj_in.topic_id):
+                raise ResourceNotFoundException("Topic", obj_in.topic_id)
+            if not user_repository.exists(db, obj_in.created_by):
+                raise ResourceNotFoundException("User (Creator)", obj_in.created_by)
+            if obj_in.question_type.value.startswith("MCQ") and not obj_in.options:
+                raise MCQOptionsInvalidException("MCQ questions must include choices options.")
+
+            obj_data = obj_in.model_dump(exclude_unset=True)
+            db_obj = Question(**obj_data)
+            db.add(db_obj)
+            db_objs.append(db_obj)
+
+        try:
+            db.commit()
+            for obj in db_objs:
+                db.refresh(obj)
+        except Exception:
+            db.rollback()
+            raise
+        return db_objs
 
     def create_question(self, db: Session, *, obj_in: QuestionCreate) -> Question:
         """

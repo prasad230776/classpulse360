@@ -18,7 +18,7 @@ def test_create_and_query_questions(db: Session):
     Test creating, fetching, and searching questions.
     """
     # Parent Subject & Topic
-    subject = subject_repository.create(db, obj_in=SubjectCreate(name="Physics", code="PHYS01"))
+    subject = subject_repository.create(db, obj_in=SubjectCreate(name="Test Physics", code="TESTPHYS01"))
     topic = topic_repository.create(db, obj_in=TopicCreate(subject_id=subject.id, name="Mechanics", code="MECH01"))
 
     # User Creator

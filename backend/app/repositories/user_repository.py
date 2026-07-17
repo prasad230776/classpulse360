@@ -1,10 +1,11 @@
-from typing import Optional, Any
+from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.repositories.base import BaseRepository
 from app.models.user import User
 from app.schemas.user import UserCreate
+from app.core.security import get_password_hash
 
 
 class UserRepository(BaseRepository[User]):
@@ -46,11 +47,9 @@ class UserRepository(BaseRepository[User]):
     def create_user(self, db: Session, *, obj_in: UserCreate) -> User:
         """
         Create a new user, mapping the schema's password to the model's hashed_password.
-        Note: True cryptography/hashing will be integrated during the Auth phase.
         """
         user_data = obj_in.model_dump(exclude={"password"})
-        # Placeholder hashing until Auth phase is implemented
-        user_data["hashed_password"] = f"hash_placeholder_{obj_in.password}"
+        user_data["hashed_password"] = get_password_hash(obj_in.password)
 
         db_obj = self.model(**user_data)
         db.add(db_obj)
@@ -66,7 +65,7 @@ class UserRepository(BaseRepository[User]):
         """
         Update a user's password.
         """
-        user.hashed_password = f"hash_placeholder_{password}"
+        user.hashed_password = get_password_hash(password)
         db.add(user)
         try:
             db.commit()

@@ -30,6 +30,10 @@ from app.services.participant_service import (
     participant_service,
     ParticipantService,
 )
+from app.services.auth_service import (
+    auth_service,
+    AuthService,
+)
 
 __all__ = [
     "InstitutionService",
@@ -48,4 +52,6 @@ __all__ = [
     "session_service",
     "ParticipantService",
     "participant_service",
+    "AuthService",
+    "auth_service",
 ]

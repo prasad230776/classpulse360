@@ -123,5 +123,70 @@ class QuizService:
         logger.info(f"Unlinking question {question_id} from quiz {quiz_id}")
         return quiz_question_repository.delete(db, id=assoc.id)
 
+    def publish_quiz(self, db: Session, *, quiz_id: UUID) -> Quiz:
+        """
+        Publish a quiz, setting is_active to True.
+        """
+        quiz = self.get_quiz(db, quiz_id)
+        logger.info(f"Publishing quiz template {quiz_id}")
+        quiz.is_active = True
+        db.add(quiz)
+        db.commit()
+        db.refresh(quiz)
+        return quiz
+
+    def unpublish_quiz(self, db: Session, *, quiz_id: UUID) -> Quiz:
+        """
+        Unpublish a quiz, setting is_active to False.
+        """
+        quiz = self.get_quiz(db, quiz_id)
+        logger.info(f"Unpublishing quiz template {quiz_id}")
+        quiz.is_active = False
+        db.add(quiz)
+        db.commit()
+        db.refresh(quiz)
+        return quiz
+
+    def duplicate_quiz(self, db: Session, *, quiz_id: UUID, created_by: UUID) -> Quiz:
+        """
+        Creates a copy of a quiz template shell and duplicates all mapped questions.
+        """
+        orig = self.get_quiz(db, quiz_id)
+        logger.info(f"Duplicating quiz {quiz_id} for creator {created_by}")
+
+        if not user_repository.exists(db, created_by):
+            raise ResourceNotFoundException("User (Creator)", created_by)
+
+        dup = Quiz(
+            title=f"Copy of {orig.title}",
+            description=orig.description,
+            instructions=orig.instructions,
+            visibility=orig.visibility,
+            shuffle_questions=orig.shuffle_questions,
+            shuffle_options=orig.shuffle_options,
+            allow_answer_change=orig.allow_answer_change,
+            show_results_after_each_question=orig.show_results_after_each_question,
+            created_by=created_by,
+            is_active=orig.is_active,
+        )
+        db.add(dup)
+        db.commit()
+        db.refresh(dup)
+
+        for qq in orig.quiz_questions:
+            new_qq = QuizQuestion(
+                quiz_id=dup.id,
+                question_id=qq.question_id,
+                question_order=qq.question_order,
+                marks=qq.marks,
+                negative_marks=qq.negative_marks,
+                time_limit_seconds=qq.time_limit_seconds,
+            )
+            db.add(new_qq)
+
+        db.commit()
+        db.refresh(dup)
+        return dup
+
 
 quiz_service = QuizService()

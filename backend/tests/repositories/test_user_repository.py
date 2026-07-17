@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from app.repositories.user_repository import user_repository
 from app.schemas.user import UserCreate, UserUpdate
 from app.common.enums import UserRole, UserStatus
+from app.core.security import verify_password
 
 
 def test_create_user(db: Session):
@@ -21,7 +22,7 @@ def test_create_user(db: Session):
     db_obj = user_repository.create_user(db, obj_in=obj_in)
     assert db_obj.id is not None
     assert db_obj.username == "johndoe"
-    assert db_obj.hashed_password == "hash_placeholder_secretpassword"
+    assert verify_password("secretpassword", db_obj.hashed_password)
 
 
 def test_user_email_and_username_exists(db: Session):
@@ -99,4 +100,4 @@ def test_update_password_and_activate(db: Session):
 
     # Update password
     updated_user = user_repository.update_password(db, user=activated_user, password="newpassword")
-    assert updated_user.hashed_password == "hash_placeholder_newpassword"
+    assert verify_password("newpassword", updated_user.hashed_password)

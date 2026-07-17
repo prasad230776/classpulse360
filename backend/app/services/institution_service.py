@@ -34,17 +34,51 @@ class InstitutionService:
             raise ResourceNotFoundException("Institution", code)
         return inst
 
-    def list_institutions(self, db: Session, *, offset: int = 0, limit: int = 100) -> List[Institution]:
+    def list_institutions(
+        self,
+        db: Session,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        sort_by: Optional[str] = None,
+        sort_order: str = "desc",
+    ) -> List[Institution]:
         """
-        List institutions with offset and limit pagination.
+        List institutions with offset/limit pagination, search text filtering, and column sorting.
         """
-        return institution_repository.get_all(db, offset=offset, limit=limit)
+        order_attr = None
+        if sort_by:
+            if hasattr(Institution, sort_by):
+                order_attr = getattr(Institution, sort_by)
+                if sort_order.lower() == "desc":
+                    order_attr = order_attr.desc()
+                else:
+                    order_attr = order_attr.asc()
 
-    def count_institutions(self, db: Session) -> int:
+        return institution_repository.get_filtered(
+            db,
+            offset=offset,
+            limit=limit,
+            search=search,
+            is_active=is_active,
+            order_by=order_attr,
+        )
+
+    def count_institutions(
+        self,
+        db: Session,
+        *,
+        search: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> int:
         """
-        Count total institutions registered.
+        Count total institutions matching filters.
         """
-        return institution_repository.count(db)
+        return institution_repository.count_filtered(
+            db, search=search, is_active=is_active
+        )
 
     def create_institution(self, db: Session, *, obj_in: InstitutionCreate) -> Institution:
         """

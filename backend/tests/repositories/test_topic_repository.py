@@ -11,7 +11,7 @@ def test_create_and_get_topics(db: Session):
     Test creating topics and fetching them by subject.
     """
     # Parent Subject
-    subj_in = SubjectCreate(name="Mathematics", code="MATH01")
+    subj_in = SubjectCreate(name="Test Mathematics", code="TESTMATH01")
     subject = subject_repository.create(db, obj_in=subj_in)
 
     topic_in1 = TopicCreate(subject_id=subject.id, name="Algebra", code="ALG01")

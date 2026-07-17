@@ -163,5 +163,26 @@ class ParticipantService:
             raise ResourceNotFoundException("Session", session_id)
         return participant_repository.get_by_session(db, session_id)
 
+    def leave_session(self, db: Session, *, participant_id: UUID) -> Participant:
+        """
+        Remove a student participant registry from the live room.
+        """
+        part = self.get_participant(db, participant_id)
+        logger.info(f"Participant {participant_id} leaving session room.")
+        return participant_repository.delete(db, id=participant_id)
+
+    def get_participant_responses(self, db: Session, *, participant_id: UUID) -> List[Response]:
+        """
+        Fetch responses history for a participant.
+        """
+        # Verifies participant exists
+        self.get_participant(db, participant_id)
+        return (
+            db.query(Response)
+            .filter(Response.participant_id == participant_id)
+            .order_by(Response.submitted_at.desc())
+            .all()
+        )
+
 
 participant_service = ParticipantService()

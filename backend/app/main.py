@@ -3,6 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.utils import setup_logging
 
+from app.api.router import api_router
+from app.api.exception_handlers import register_exception_handlers
+from app.api.middlewares import (
+    RequestIDMiddleware,
+    RequestTimingMiddleware,
+    RequestLoggingMiddleware,
+)
+from app.websockets import websocket_router
+
 # Configure Centralized Logging
 setup_logging()
 
@@ -22,6 +31,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register middlewares (bottom-to-top nested wrapping)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(RequestIDMiddleware)
+
+# Register central routers
+app.include_router(api_router, prefix="/api")
+app.include_router(websocket_router)
+
+# Register global exception handlers
+register_exception_handlers(app)
 
 
 @app.get("/health", tags=["Health"])
