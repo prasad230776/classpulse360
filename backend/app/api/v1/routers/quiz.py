@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Optional, List
@@ -9,10 +10,16 @@ from app.api.responses import APIResponse
 from app.api.pagination import PaginationParams, PaginatedResponse, PageMetadata
 from app.schemas.quiz import QuizCreate, QuizUpdate, QuizResponse
 from app.schemas.quiz_question import QuizQuestionResponse
+from app.schemas.response import ResponseResponse, ResponseGradeRequest
 from app.services.quiz_service import quiz_service
+from app.services.participant_service import participant_service
 from app.database.session import get_db
 from app.api.v1.dependencies.auth import get_current_user, require_role
-from app.common.enums import UserRole
+from app.common.enums import UserRole, SubmissionStatus
+from app.models.user import User
+from app.models.response import Response
+from app.models.participant import Participant
+from app.exceptions import ResourceNotFoundException
 from app.utils.pagination import get_page_params, get_paginated_metadata
 
 quiz_router = APIRouter()
@@ -251,4 +258,179 @@ def remove_question(
         success=True,
         message="Question removed from quiz successfully.",
         data=QuizQuestionResponse.model_validate(assoc),
+    )
+
+
+@quiz_router.get(
+    "/student/submissions",
+    response_model=APIResponse[List[ResponseResponse]],
+    status_code=status.HTTP_200_OK,
+    summary="Get logged-in student submissions",
+)
+def get_student_submissions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve all submissions (responses) submitted by the logged-in student.
+    """
+    results = (
+        db.query(Response)
+        .join(Participant)
+        .filter(Participant.user_id == current_user.id)
+        .order_by(Response.submitted_at.desc())
+        .all()
+    )
+    return APIResponse(
+        success=True,
+        message="Student submissions retrieved.",
+        data=[ResponseResponse.model_validate(r) for r in results],
+    )
+
+
+@quiz_router.get(
+    "/student/submissions/{submission_id}",
+    response_model=APIResponse[ResponseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get single submission details",
+)
+def get_student_submission_details(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve details for a specific submission owned by the student.
+    """
+    resp = (
+        db.query(Response)
+        .join(Participant)
+        .filter(Response.id == submission_id, Participant.user_id == current_user.id)
+        .first()
+    )
+    if not resp:
+        raise ResourceNotFoundException("Submission", submission_id)
+    
+    return APIResponse(
+        success=True,
+        message="Submission details retrieved.",
+        data=ResponseResponse.model_validate(resp),
+    )
+
+
+@quiz_router.get(
+    "/{quiz_id}/submissions",
+    response_model=APIResponse[List[ResponseResponse]],
+    status_code=status.HTTP_200_OK,
+    summary="Get all submissions for a quiz (Teacher)",
+    dependencies=[Depends(require_role(UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
+def get_teacher_quiz_submissions(
+    quiz_id: UUID,
+    status: Optional[SubmissionStatus] = Query(None, description="Filter by submission status"),
+    search: Optional[str] = Query(None, description="Search by student name or username"),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve all submissions (responses) for a specific quiz with status filter and search (restricted to teachers).
+    """
+    from app.models.session import Session as QuizSession
+    query = (
+        db.query(Response)
+        .join(Participant, Response.participant_id == Participant.id)
+        .join(QuizSession, Participant.session_id == QuizSession.id)
+        .filter(QuizSession.quiz_id == quiz_id)
+    )
+    
+    if search:
+        query = query.join(User, Participant.user_id == User.id).filter(
+            or_(
+                User.name.ilike(f"%{search}%"),
+                User.username.ilike(f"%{search}%")
+            )
+        )
+        
+    if status:
+        query = query.filter(Response.submission_status == status)
+        
+    results = query.order_by(Response.submitted_at.desc()).all()
+    return APIResponse(
+        success=True,
+        message="Quiz submissions retrieved.",
+        data=[ResponseResponse.model_validate(r) for r in results],
+    )
+
+
+@quiz_router.get(
+    "/{quiz_id}/submissions/{submission_id}",
+    response_model=APIResponse[ResponseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get single submission details (Teacher)",
+    dependencies=[Depends(require_role(UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
+def get_teacher_submission_details(
+    quiz_id: UUID,
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve details for a specific student submission under a quiz (restricted to teachers).
+    """
+    from app.models.session import Session as QuizSession
+    resp = (
+        db.query(Response)
+        .join(Participant, Response.participant_id == Participant.id)
+        .join(QuizSession, Participant.session_id == QuizSession.id)
+        .filter(Response.id == submission_id, QuizSession.quiz_id == quiz_id)
+        .first()
+    )
+    if not resp:
+        raise ResourceNotFoundException("Submission", submission_id)
+        
+    return APIResponse(
+        success=True,
+        message="Submission details retrieved.",
+        data=ResponseResponse.model_validate(resp),
+    )
+
+
+@quiz_router.post(
+    "/{quiz_id}/submissions/{submission_id}/grade",
+    response_model=APIResponse[ResponseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Grade a student submission (Teacher)",
+    dependencies=[Depends(require_role(UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
+def grade_quiz_submission(
+    quiz_id: UUID,
+    submission_id: UUID,
+    payload: ResponseGradeRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Grade or update grading for a specific student submission (restricted to teachers).
+    """
+    from app.models.session import Session as QuizSession
+    resp = (
+        db.query(Response)
+        .join(Participant, Response.participant_id == Participant.id)
+        .join(QuizSession, Participant.session_id == QuizSession.id)
+        .filter(Response.id == submission_id, QuizSession.quiz_id == quiz_id)
+        .first()
+    )
+    if not resp:
+        raise ResourceNotFoundException("Submission", submission_id)
+
+    updated_resp = participant_service.grade_response(
+        db,
+        participant_id=resp.participant_id,
+        question_id=resp.question_id,
+        score_awarded=payload.score_awarded,
+        feedback=payload.feedback,
+        is_correct=payload.is_correct,
+    )
+    return APIResponse(
+        success=True,
+        message="Submission graded successfully.",
+        data=ResponseResponse.model_validate(updated_resp),
     )

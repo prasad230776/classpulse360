@@ -1,8 +1,23 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 from app.common.enums import VisibilityType
+
+
+class QuizConfig(BaseModel):
+    timer_duration: Optional[int] = Field(None, ge=0, description="Overall timer duration in seconds.")
+    allow_multiple_attempts: bool = Field(False, description="Allow multiple attempts on the quiz.")
+    show_results_immediately: bool = Field(True, description="Display results immediately after completion.")
+    show_correct_answers: bool = Field(True, description="Display correct answers in results.")
+    randomize_questions: bool = Field(False, description="Randomize question delivery order.")
+    require_fullscreen: bool = Field(False, description="Enforce fullscreen mode on student UI.")
+    allow_question_navigation: bool = Field(True, description="Allow going back and forth between questions.")
+    allow_question_review: bool = Field(True, description="Allow reviewing answers before final submission.")
+    assignment_due_date: Optional[datetime] = Field(None, description="Due date and time for assignments.")
+    assignment_max_file_size: Optional[int] = Field(None, ge=0, description="Maximum allowed file size in bytes.")
+    allowed_file_extensions: List[str] = Field(default_factory=list, description="List of allowed file extensions.")
+    allowed_submission_types: List[str] = Field(default_factory=list, description="Allowed submission types.")
 
 
 class QuizBase(BaseModel):
@@ -21,6 +36,7 @@ class QuizBase(BaseModel):
         description="Flag to display accuracy metrics immediately after choice submission."
     )
     is_active: bool = Field(True, description="Flag indicating if the quiz is active.")
+    settings_config: Optional[QuizConfig] = Field(default_factory=QuizConfig, description="Configuration settings.")
 
 
 class QuizCreate(QuizBase):
@@ -43,6 +59,7 @@ class QuizUpdate(BaseModel):
     allow_answer_change: Optional[bool] = None
     show_results_after_each_question: Optional[bool] = None
     is_active: Optional[bool] = None
+    settings_config: Optional[QuizConfig] = None
 
 
 class QuizResponse(QuizBase):

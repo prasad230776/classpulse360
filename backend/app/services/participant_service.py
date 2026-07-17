@@ -22,7 +22,7 @@ from app.exceptions import (
     AnswerChangeNotAllowedException,
     BusinessRuleException,
 )
-from app.common.enums import ParticipantStatus, SessionStatus
+from app.common.enums import ParticipantStatus, SessionStatus, SubmissionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,8 @@ class ParticipantService:
         participant_id: UUID,
         question_id: UUID,
         selected_answer: Dict[str, Any],
-        response_time_ms: Optional[int] = None
+        response_time_ms: Optional[int] = None,
+        submission_status: Optional[SubmissionStatus] = None
     ) -> Response:
         """
         Track and score student answer responses, updating participant total scores.
@@ -111,7 +112,10 @@ class ParticipantService:
                     raise BusinessRuleException("A valid URL starting with http:// or https:// is required.", code="INVALID_SUBMISSION")
             elif question.question_type == QuestionType.FILE:
                 file_url = selected_answer.get("file_url")
-                if not file_url or not (file_url.startswith("http://") or file_url.startswith("https://")):
+                storage_path = selected_answer.get("storage_path")
+                if not file_url and not storage_path:
+                    raise BusinessRuleException("A valid file URL or storage path is required.", code="INVALID_SUBMISSION")
+                if file_url and not (file_url.startswith("http://") or file_url.startswith("https://")):
                     raise BusinessRuleException("A valid file URL is required.", code="INVALID_SUBMISSION")
             elif question.question_type == QuestionType.TEXT:
                 text_val = selected_answer.get("text")
@@ -125,9 +129,21 @@ class ParticipantService:
             is_correct = (selected_answer == question.correct_answer)
             score_awarded = marks if is_correct else -negative_marks
 
+        if submission_status is None:
+            submission_status = SubmissionStatus.SUBMITTED
+
         # Check if response already exists
         existing_response = response_repository.get_response(db, participant_id, question_id)
         if existing_response:
+            if existing_response.submission_status in (SubmissionStatus.SUBMITTED, SubmissionStatus.GRADED):
+                config = getattr(session.quiz, "settings_config", None) or {}
+                allow_attempts = config.get("allow_multiple_attempts", False) or config.get("allow_resubmission", False)
+                if not allow_attempts:
+                    raise BusinessRuleException(
+                        "Submitted assignments cannot be modified unless the quiz configuration allows resubmission.",
+                        code="RESUBMISSION_DISABLED"
+                    )
+
             # If changing answer is locked by quiz settings, reject
             if not session.quiz.allow_answer_change:
                 raise AnswerChangeNotAllowedException()
@@ -145,7 +161,8 @@ class ParticipantService:
                 is_correct=is_correct,
                 score_awarded=score_awarded,
                 response_time_ms=response_time_ms,
-                submitted_at=datetime.utcnow()
+                submitted_at=datetime.utcnow(),
+                submission_status=submission_status
             )
             resp = response_repository.update(db, db_obj=existing_response, obj_in=update_in)
 
@@ -168,7 +185,8 @@ class ParticipantService:
             is_correct=is_correct,
             score_awarded=score_awarded,
             response_time_ms=response_time_ms,
-            submitted_at=datetime.utcnow()
+            submitted_at=datetime.utcnow(),
+            submission_status=submission_status
         )
         resp = response_repository.create(db, obj_in=resp_in)
 
@@ -211,6 +229,72 @@ class ParticipantService:
             .order_by(Response.submitted_at.desc())
             .all()
         )
+
+    def grade_response(
+        self,
+        db: Session,
+        *,
+        participant_id: UUID,
+        question_id: UUID,
+        score_awarded: Decimal,
+        feedback: Optional[str] = None,
+        is_correct: Optional[bool] = None
+    ) -> Response:
+        """
+        Grade a participant's answer response manually, updating score aggregates.
+        """
+        participant = self.get_participant(db, participant_id)
+        resp = response_repository.get_response(db, participant_id, question_id)
+        if not resp:
+            raise ResourceNotFoundException("Response", f"part={participant_id}, q={question_id}")
+
+        if resp.submission_status == SubmissionStatus.DRAFT:
+            raise BusinessRuleException("Drafts cannot be graded.", code="CANNOT_GRADE_DRAFT")
+        if resp.submission_status not in (SubmissionStatus.SUBMITTED, SubmissionStatus.GRADED):
+            raise BusinessRuleException("Only submitted assignments can be graded.", code="CANNOT_GRADE_NON_SUBMITTED")
+
+        score_diff = score_awarded - resp.score_awarded
+        
+        correct_diff = 0
+        wrong_diff = 0
+        if is_correct is not None:
+            old_is_correct = resp.is_correct if resp.is_correct is not None else False
+            new_is_correct = is_correct
+            
+            if old_is_correct != new_is_correct:
+                if new_is_correct:
+                    correct_diff = 1
+                    wrong_diff = -1
+                else:
+                    correct_diff = -1
+                    wrong_diff = 1
+
+        from app.common.enums import GradingStatus
+        
+        resp.score_awarded = score_awarded
+        resp.feedback = feedback
+        resp.grading_status = GradingStatus.GRADED
+        resp.submission_status = SubmissionStatus.GRADED
+        if is_correct is not None:
+            resp.is_correct = is_correct
+
+        db.add(resp)
+
+        part_update = ParticipantUpdate(
+            score=max(Decimal("0.00"), participant.score + score_diff),
+            correct_answers=max(0, participant.correct_answers + correct_diff),
+            wrong_answers=max(0, participant.wrong_answers + wrong_diff),
+        )
+        participant_repository.update(db, db_obj=participant, obj_in=part_update)
+        
+        try:
+            db.commit()
+            db.refresh(resp)
+        except Exception:
+            db.rollback()
+            raise
+
+        return resp
 
 
 participant_service = ParticipantService()

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy import String, Boolean, DateTime, Enum, ForeignKey, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.database.base import Base
 from app.common.enums import VisibilityType
@@ -44,6 +44,12 @@ class Quiz(Base):
         default=True,
         server_default=text("true"),
         nullable=False,
+    )
+    settings_config: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

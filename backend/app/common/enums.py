@@ -74,3 +74,14 @@ class AnswerStatus(str, Enum):
     ANSWERED = "ANSWERED"
     SKIPPED = "SKIPPED"
     TIMEOUT = "TIMEOUT"
+
+
+class GradingStatus(str, Enum):
+    PENDING = "PENDING"
+    GRADED = "GRADED"
+
+
+class SubmissionStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    GRADED = "GRADED"

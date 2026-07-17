@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, TYPE_CHECKING
 from decimal import Decimal
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, BigInteger, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, BigInteger, UniqueConstraint, Enum, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.database.base import Base
+from app.common.enums import GradingStatus, SubmissionStatus
 
 if TYPE_CHECKING:
     from app.models.participant import Participant
@@ -48,6 +49,19 @@ class Response(Base):
     )
     response_time_ms: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    feedback: Mapped[Optional[str]] = mapped_column(nullable=True)
+    grading_status: Mapped[GradingStatus] = mapped_column(
+        Enum(GradingStatus, name="grading_status"),
+        default=GradingStatus.PENDING,
+        server_default=text("'PENDING'"),
+        nullable=False,
+    )
+    submission_status: Mapped[SubmissionStatus] = mapped_column(
+        Enum(SubmissionStatus, name="submission_status"),
+        default=SubmissionStatus.SUBMITTED,
+        server_default=text("'SUBMITTED'"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.utcnow,

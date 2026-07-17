@@ -52,16 +52,37 @@ class QuizService:
         if not user_repository.exists(db, obj_in.created_by):
             raise ResourceNotFoundException("User (Creator)", obj_in.created_by)
 
+        from app.schemas.quiz import QuizConfig
+        if obj_in.settings_config is None:
+            config = QuizConfig()
+        elif isinstance(obj_in.settings_config, dict):
+            config = QuizConfig(**obj_in.settings_config)
+        else:
+            config = obj_in.settings_config
+
+        obj_data = obj_in.model_dump()
+        obj_data["settings_config"] = config.model_dump()
+
         logger.info(f"Creating new quiz template '{obj_in.title}' by teacher {obj_in.created_by}")
-        return quiz_repository.create(db, obj_in=obj_in)
+        return quiz_repository.create(db, obj_in=obj_data)
 
     def update_quiz(self, db: Session, *, quiz_id: UUID, obj_in: QuizUpdate) -> Quiz:
         """
         Update quiz template configurations.
         """
         db_obj = self.get_quiz(db, quiz_id)
+        
+        update_data = obj_in.model_dump(exclude_unset=True)
+        if "settings_config" in update_data and update_data["settings_config"] is not None:
+            from app.schemas.quiz import QuizConfig
+            if isinstance(update_data["settings_config"], dict):
+                config = QuizConfig(**update_data["settings_config"])
+            else:
+                config = update_data["settings_config"]
+            update_data["settings_config"] = config.model_dump()
+
         logger.info(f"Updating quiz template {quiz_id}")
-        return quiz_repository.update(db, db_obj=db_obj, obj_in=obj_in)
+        return quiz_repository.update(db, db_obj=db_obj, obj_in=update_data)
 
     def delete_quiz(self, db: Session, *, quiz_id: UUID) -> Quiz:
         """

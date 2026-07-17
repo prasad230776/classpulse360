@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field
 
 from app.api.responses import APIResponse
 from app.schemas.participant import ParticipantResponse
-from app.schemas.response import ResponseResponse
+from app.schemas.response import ResponseResponse, ResponseGradeRequest
 from app.services.participant_service import participant_service
 from app.services.session_service import session_service
 from app.database.session import get_db
-from app.api.v1.dependencies.auth import get_current_user
+from app.api.v1.dependencies.auth import get_current_user, require_role
+from app.common.enums import UserRole, SubmissionStatus
 from app.models.user import User
 from app.exceptions import BusinessRuleException, ResourceNotFoundException
 from app.websockets import connection_manager
@@ -28,6 +29,7 @@ class SubmitAnswerRequest(BaseModel):
     question_id: UUID = Field(..., description="UUID of the question being answered")
     selected_answer: Dict[str, Any] = Field(..., description="Selected options/answers payload")
     response_time_ms: Optional[int] = Field(None, ge=0, description="Response time in milliseconds")
+    submission_status: Optional[SubmissionStatus] = Field(None, description="Optional submission status")
 
 
 class ScoreStatsResponse(BaseModel):
@@ -194,6 +196,7 @@ async def submit_answer(
         question_id=payload.question_id,
         selected_answer=payload.selected_answer,
         response_time_ms=payload.response_time_ms,
+        submission_status=payload.submission_status,
     )
     room_id_str = str(part.session_id)
 
@@ -287,4 +290,106 @@ def get_answer_history(
         success=True,
         message="Answer response history retrieved.",
         data=[ResponseResponse.model_validate(r) for r in history],
+    )
+
+
+@participant_router.put(
+    "/{participant_id}/answers/{question_id}/grade",
+    response_model=APIResponse[ResponseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Grade student submission",
+    dependencies=[Depends(require_role(UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN))],
+)
+def grade_submission(
+    participant_id: UUID,
+    question_id: UUID,
+    payload: ResponseGradeRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Assign or update marks and add feedback for a student submission (restricted to teachers/admins).
+    """
+    resp = participant_service.grade_response(
+        db,
+        participant_id=participant_id,
+        question_id=question_id,
+        score_awarded=payload.score_awarded,
+        feedback=payload.feedback,
+        is_correct=payload.is_correct,
+    )
+    return APIResponse(
+        success=True,
+        message="Submission graded successfully.",
+        data=ResponseResponse.model_validate(resp),
+    )
+
+
+@participant_router.post(
+    "/{participant_id}/answers/{question_id}/upload",
+    response_model=APIResponse[ResponseResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Submit a URL for an assignment submission",
+)
+async def upload_submission_file(
+    participant_id: UUID,
+    question_id: UUID,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Accept a pre-existing file URL from GitHub, LinkedIn, or Google Drive for a submission.
+    No direct file upload or storage is performed.
+    """
+    from urllib.parse import urlparse
+    from app.models.session import Session as QuizSession
+
+    participant = participant_service.get_participant(db, participant_id)
+    if participant.user_id != current_user.id:
+        raise BusinessRuleException("You are not authorized to upload files for this participant.")
+
+    session_obj = db.query(QuizSession).filter(QuizSession.id == participant.session_id).first()
+    if not session_obj or session_obj.status == "COMPLETED":
+        raise BusinessRuleException("Cannot upload submissions to a completed session.")
+
+    quiz = session_obj.quiz
+    settings_dict = quiz.settings_config or {}
+    if not isinstance(settings_dict, dict):
+        settings_dict = settings_dict.model_dump() if hasattr(settings_dict, "model_dump") else {}
+
+    file_url = payload.get("file_url")
+    if not isinstance(file_url, str) or not file_url.strip():
+        raise BusinessRuleException("A valid file URL is required.")
+
+    parsed_url = urlparse(file_url)
+    if not parsed_url.scheme or not parsed_url.netloc:
+        raise BusinessRuleException("A valid file URL is required.")
+
+    host = parsed_url.netloc.lower()
+    allowed_hosts = ["github.com", "www.github.com", "linkedin.com", "www.linkedin.com", "drive.google.com", "www.drive.google.com"]
+    if host not in allowed_hosts:
+        raise BusinessRuleException("Only URLs from GitHub, LinkedIn, or Google Drive are allowed.")
+
+    if not (file_url.startswith("http://") or file_url.startswith("https://")):
+        raise BusinessRuleException("A valid file URL is required.")
+
+    selected_answer = {
+        "file_url": file_url,
+        "source": "github" if "github.com" in host else "linkedin" if "linkedin.com" in host else "google_drive",
+        "host": host,
+        "size": None,
+    }
+
+    resp = participant_service.submit_answer(
+        db,
+        participant_id=participant_id,
+        question_id=question_id,
+        selected_answer=selected_answer,
+        submission_status=SubmissionStatus.SUBMITTED,
+    )
+
+    return APIResponse(
+        success=True,
+        message="Submission URL saved successfully.",
+        data=ResponseResponse.model_validate(resp),
     )
